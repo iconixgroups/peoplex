@@ -8,6 +8,7 @@ const config = require('./config/config');
 
 // Import routes
 const authRoutes = require('./api/auth/authRoutes');
+const securityRoutes = require('./api/security/securityRoutes');
 const organizationRoutes = require('./api/core/organizationRoutes');
 const departmentRoutes = require('./api/core/departmentRoutes');
 const locationRoutes = require('./api/core/locationRoutes');
@@ -15,6 +16,14 @@ const jobTitleRoutes = require('./api/core/jobTitleRoutes');
 const employeeRoutes = require('./api/hr/employeeRoutes');
 const attendanceRoutes = require('./api/hr/attendanceRoutes');
 const leaveRoutes = require('./api/hr/leaveRoutes');
+const performanceRoutes = require('./api/hr/performance/performanceRoutes');
+const learningRoutes = require('./api/hr/learning/learningRoutes');
+const payrollRoutes = require('./api/hr/payroll/payrollRoutes');
+const recruitmentRoutes = require('./api/hr/recruitment/recruitmentRoutes');
+const workflowRoutes = require('./api/workflow/workflowRoutes');
+const formRoutes = require('./api/forms/formRoutes');
+const dashboardRoutes = require('./api/dashboard/dashboardRoutes');
+const webhookRoutes = require('./api/webhooks/webhookRoutes');
 
 // Initialize Express app
 const app = express();
@@ -39,15 +48,29 @@ app.use(morgan('dev')); // Logging
 app.use(express.json()); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/organizations', organizationRoutes);
-app.use('/api/departments', departmentRoutes);
-app.use('/api/locations', locationRoutes);
-app.use('/api/job-titles', jobTitleRoutes);
-app.use('/api/employees', employeeRoutes);
-app.use('/api/attendance', attendanceRoutes);
-app.use('/api/leave', leaveRoutes);
+// API Routes (v1)
+const apiV1Router = express.Router();
+
+apiV1Router.use('/auth', authRoutes);
+apiV1Router.use('/security', securityRoutes);
+apiV1Router.use('/organizations', organizationRoutes);
+apiV1Router.use('/departments', departmentRoutes);
+apiV1Router.use('/locations', locationRoutes);
+apiV1Router.use('/job-titles', jobTitleRoutes);
+apiV1Router.use('/employees', employeeRoutes);
+apiV1Router.use('/attendance', attendanceRoutes);
+apiV1Router.use('/leave', leaveRoutes);
+apiV1Router.use('/performance', performanceRoutes);
+apiV1Router.use('/learning', learningRoutes);
+apiV1Router.use('/payroll', payrollRoutes);
+apiV1Router.use('/recruitment', recruitmentRoutes);
+apiV1Router.use('/workflows', workflowRoutes);
+apiV1Router.use('/forms', formRoutes);
+apiV1Router.use('/dashboards', dashboardRoutes);
+apiV1Router.use('/webhooks', webhookRoutes);
+
+// Mount v1 API routes
+app.use('/api/v1', apiV1Router);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -57,24 +80,28 @@ app.get('/health', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  
+  // Format error response according to documentation
+  res.status(err.status || 500).json({
+    status: 'error',
+    error: {
+      code: err.code || 'internal_error',
+      message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+      details: err.details || []
+    }
   });
 });
 
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.url} not found`
+    status: 'error',
+    error: {
+      code: 'resource_not_found',
+      message: `Route ${req.method} ${req.url} not found`
+    }
   });
 });
 
-// Start the server
-const PORT = config.server.port;
-app.listen(PORT, () => {
-  console.log(`People X server running on port ${PORT} in ${config.server.env} mode`);
-});
-
+// Export the app
 module.exports = app;

@@ -1,13 +1,14 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Dashboard from './components/Dashboard/Dashboard';
+import Employees from './components/Employees/Employees';
+import Attendance from './components/Attendance/Attendance';
+import Leave from './components/Leave/Leave';
+import Login from './components/Login/Login';
+import LoginTest from './components/Login/LoginTest';
 import './App.css';
 
 // Placeholder components
-const Login = () => <div>Login Page</div>;
-const Dashboard = () => <div>Dashboard</div>;
-const Employees = () => <div>Employees</div>;
-const Attendance = () => <div>Attendance</div>;
-const Leave = () => <div>Leave Management</div>;
 const Recruitment = () => <div>Recruitment</div>;
 const Performance = () => <div>Performance</div>;
 const Payroll = () => <div>Payroll</div>;
@@ -19,6 +20,7 @@ function App() {
       <div className="App">
         <Routes>
           <Route path="/" element={<Login />} />
+          <Route path="/login-test" element={<LoginTest />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/employees/*" element={<Employees />} />
           <Route path="/attendance/*" element={<Attendance />} />

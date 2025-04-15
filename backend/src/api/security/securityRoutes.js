@@ -33,7 +33,7 @@ router.get('/audit-logs', checkRole(['admin', 'security_admin', 'data_protection
 router.get('/login-history', securityController.getLoginHistory);
 
 // GDPR data access routes
-router.get('/data-access/:user_id', handleDataAccessRequest);
-router.post('/data-deletion/:user_id', handleDataDeletionRequest);
+router.get('/data-access/:user_id', (req, res) => handleDataAccessRequest(req, res));
+router.post('/data-deletion/:user_id', (req, res) => handleDataDeletionRequest(req, res));
 
 module.exports = router;

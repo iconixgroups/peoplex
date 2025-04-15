@@ -22,6 +22,12 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+// Alias for backward compatibility
+const authenticate = authenticateToken;
+
+// Alias for recruitment module
+const authenticateUser = authenticateToken;
+
 /**
  * Middleware to check role-based permissions
  * @param {Array} requiredRoles - Array of roles allowed to access the route
@@ -64,8 +70,34 @@ const checkPermission = (requiredPermissions) => {
   };
 };
 
+/**
+ * Middleware to authorize HR roles
+ * Checks if user has HR-related roles or permissions
+ */
+const authorizeHR = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'User not authenticated.' });
+  }
+  
+  // Get user roles as array, handling potential format differences
+  const userRoles = Array.isArray(req.user.roles) ? req.user.roles : [req.user.role];
+  
+  // Check if user has HR-related roles
+  const hrRoles = ['admin', 'hr_manager', 'hr_admin', 'recruiter'];
+  const hasHRRole = hrRoles.some(role => userRoles.includes(role));
+  
+  if (!hasHRRole) {
+    return res.status(403).json({ error: 'Access denied. HR role required.' });
+  }
+  
+  next();
+};
+
 module.exports = {
   authenticateToken,
+  authenticate, // Export the alias
+  authenticateUser, // Export alias for recruitment module
+  authorizeHR, // Export HR authorization middleware
   checkRole,
   checkPermission
 };

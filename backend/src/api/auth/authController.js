@@ -1,5 +1,5 @@
 // Authentication Controller for People X
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pgPool } = require('../../config/database');
 const config = require('../../config/config');
@@ -8,12 +8,12 @@ const config = require('../../config/config');
  * User registration
  */
 const register = async (req, res) => {
-  const { username, email, password, organizationId } = req.body;
+  const { username, email, password, first_name, last_name, organization_id = 1 } = req.body;
   
   try {
     // Check if user already exists
     const userCheck = await pgPool.query(
-      'SELECT * FROM auth.users WHERE email = $1 OR username = $2',
+      'SELECT * FROM security.users WHERE email = $1 OR username = $2',
       [email, username]
     );
     
@@ -27,23 +27,24 @@ const register = async (req, res) => {
     
     // Create new user
     const result = await pgPool.query(
-      `INSERT INTO auth.users 
-      (organization_id, username, email, password_hash, salt, is_active, created_at, updated_at) 
-      VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
-      RETURNING id, username, email, is_active`,
-      [organizationId, username, email, passwordHash, salt, true]
+      `INSERT INTO security.users 
+      (organization_id, username, email, password, first_name, last_name, role, status, created_at, updated_at) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
+      RETURNING id, username, email, first_name, last_name, role, organization_id, status`,
+      [organization_id, username, email, passwordHash, first_name, last_name, 'employee', 'active']
     );
     
-    // Assign default role to user
-    await pgPool.query(
-      `INSERT INTO auth.user_roles (user_id, role_id, created_at)
-      VALUES ($1, (SELECT id FROM auth.roles WHERE name = 'employee' AND organization_id = $2), CURRENT_TIMESTAMP)`,
-      [result.rows[0].id, organizationId]
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: result.rows[0].id, role: 'employee', organization_id },
+      process.env.JWT_SECRET || config.jwt.secret || 'people_x_jwt_secret',
+      { expiresIn: '24h' }
     );
     
     res.status(201).json({
       message: 'User registered successfully',
-      user: result.rows[0]
+      user: result.rows[0],
+      token
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -60,7 +61,7 @@ const login = async (req, res) => {
   try {
     // Find user by email
     const result = await pgPool.query(
-      'SELECT * FROM auth.users WHERE email = $1',
+      'SELECT * FROM security.users WHERE email = $1',
       [email]
     );
     
@@ -71,37 +72,20 @@ const login = async (req, res) => {
     const user = result.rows[0];
     
     // Check if user is active
-    if (!user.is_active) {
+    if (user.status !== 'active') {
       return res.status(401).json({ error: 'Account is disabled' });
     }
     
     // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    const isValidPassword = await bcrypt.compare(password, user.password);
     
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
     
     // Get user roles
-    const rolesResult = await pgPool.query(
-      `SELECT r.name FROM auth.roles r
-      JOIN auth.user_roles ur ON r.id = ur.role_id
-      WHERE ur.user_id = $1`,
-      [user.id]
-    );
-    
-    const roles = rolesResult.rows.map(row => row.name);
-    
-    // Get user permissions
-    const permissionsResult = await pgPool.query(
-      `SELECT p.code FROM auth.permissions p
-      JOIN auth.role_permissions rp ON p.id = rp.permission_id
-      JOIN auth.user_roles ur ON rp.role_id = ur.role_id
-      WHERE ur.user_id = $1`,
-      [user.id]
-    );
-    
-    const permissions = permissionsResult.rows.map(row => row.code);
+    const roles = [user.role]; // Using role from user table directly
+    const permissions = []; // Simplified for now
     
     // Create JWT token
     const tokenPayload = {
@@ -113,25 +97,28 @@ const login = async (req, res) => {
       permissions
     };
     
-    const token = jwt.sign(tokenPayload, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
-    const refreshToken = jwt.sign({ id: user.id }, config.jwt.secret, { expiresIn: config.jwt.refreshExpiresIn });
+    const token = jwt.sign(tokenPayload, config.jwt.secret || 'people_x_jwt_secret', { expiresIn: config.jwt.expiresIn || '24h' });
+    const refreshToken = jwt.sign({ id: user.id }, config.jwt.secret || 'people_x_jwt_secret', { expiresIn: config.jwt.refreshExpiresIn || '7d' });
     
     // Update last login timestamp
     await pgPool.query(
-      'UPDATE auth.users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
+      'UPDATE security.users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
       [user.id]
     );
     
     res.status(200).json({
-      message: 'Login successful',
-      token,
-      refreshToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        roles,
-        permissions
+      status: 'success',
+      data: {
+        token,
+        expires_at: new Date(Date.now() + 86400000).toISOString(), // 24 hours
+        refreshToken,
+        user: {
+          id: user.id,
+          username: user.username,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          is_admin: user.role === 'admin'
+        }
       }
     });
   } catch (error) {
@@ -152,11 +139,11 @@ const refreshToken = async (req, res) => {
   
   try {
     // Verify refresh token
-    const decoded = jwt.verify(refreshToken, config.jwt.secret);
+    const decoded = jwt.verify(refreshToken, config.jwt.secret || 'people_x_jwt_secret');
     
     // Get user data
     const result = await pgPool.query(
-      'SELECT * FROM auth.users WHERE id = $1',
+      'SELECT * FROM security.users WHERE id = $1',
       [decoded.id]
     );
     
@@ -166,38 +153,17 @@ const refreshToken = async (req, res) => {
     
     const user = result.rows[0];
     
-    // Get user roles
-    const rolesResult = await pgPool.query(
-      `SELECT r.name FROM auth.roles r
-      JOIN auth.user_roles ur ON r.id = ur.role_id
-      WHERE ur.user_id = $1`,
-      [user.id]
-    );
-    
-    const roles = rolesResult.rows.map(row => row.name);
-    
-    // Get user permissions
-    const permissionsResult = await pgPool.query(
-      `SELECT p.code FROM auth.permissions p
-      JOIN auth.role_permissions rp ON p.id = rp.permission_id
-      JOIN auth.user_roles ur ON rp.role_id = ur.role_id
-      WHERE ur.user_id = $1`,
-      [user.id]
-    );
-    
-    const permissions = permissionsResult.rows.map(row => row.code);
-    
     // Create new JWT token
     const tokenPayload = {
       id: user.id,
       username: user.username,
       email: user.email,
       organizationId: user.organization_id,
-      roles,
-      permissions
+      roles: [user.role],
+      permissions: []
     };
     
-    const token = jwt.sign(tokenPayload, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
+    const token = jwt.sign(tokenPayload, config.jwt.secret || 'people_x_jwt_secret', { expiresIn: config.jwt.expiresIn || '24h' });
     
     res.status(200).json({
       message: 'Token refreshed successfully',
@@ -215,7 +181,7 @@ const refreshToken = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const result = await pgPool.query(
-      'SELECT id, username, email, is_active, created_at FROM auth.users WHERE id = $1',
+      'SELECT id, username, email, first_name, last_name, role, status, created_at FROM security.users WHERE id = $1',
       [req.user.id]
     );
     
@@ -241,7 +207,7 @@ const changePassword = async (req, res) => {
   try {
     // Get user data
     const result = await pgPool.query(
-      'SELECT * FROM auth.users WHERE id = $1',
+      'SELECT * FROM security.users WHERE id = $1',
       [req.user.id]
     );
     
@@ -252,7 +218,7 @@ const changePassword = async (req, res) => {
     const user = result.rows[0];
     
     // Verify current password
-    const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
+    const isValidPassword = await bcrypt.compare(currentPassword, user.password);
     
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Current password is incorrect' });
@@ -264,8 +230,8 @@ const changePassword = async (req, res) => {
     
     // Update password
     await pgPool.query(
-      'UPDATE auth.users SET password_hash = $1, salt = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
-      [passwordHash, salt, req.user.id]
+      'UPDATE security.users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [passwordHash, req.user.id]
     );
     
     res.status(200).json({

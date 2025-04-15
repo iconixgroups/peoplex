@@ -1,6 +1,12 @@
-import axios from 'axios';
+import axios, { InternalAxiosRequestConfig, AxiosResponse, AxiosError, AxiosHeaders } from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+interface ErrorResponse {
+  code?: string;
+  message?: string;
+  details?: string[];
+}
+
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api/v1';
 
 // Create axios instance
 const api = axios.create({
@@ -12,24 +18,42 @@ const api = axios.create({
 
 // Request interceptor for adding auth token
 api.interceptors.request.use(
-  (config) => {
+  (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem('token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      const headers = new AxiosHeaders(config.headers);
+      headers.set('Authorization', `Bearer ${token}`);
+      config.headers = headers;
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error: AxiosError) => Promise.reject(error)
 );
 
 // Response interceptor for handling errors
 api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // Handle 401 Unauthorized errors
-    if (error.response && error.response.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/';
+  (response: AxiosResponse) => response,
+  (error: AxiosError<ErrorResponse>) => {
+    if (error.response) {
+      // Handle 401 Unauthorized errors
+      if (error.response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
+      // Return the error response in the documented format
+      return Promise.reject({
+        response: {
+          data: {
+            status: 'error',
+            error: {
+              code: error.response.data?.code || 'unknown_error',
+              message: error.response.data?.message || 'An error occurred',
+              details: error.response.data?.details || []
+            }
+          }
+        }
+      });
     }
     return Promise.reject(error);
   }
@@ -44,7 +68,10 @@ export const authService = {
     api.post('/auth/register', userData),
   
   refreshToken: (refreshToken: string) => 
-    api.post('/auth/refresh-token', { refreshToken }),
+    api.post('/auth/refresh', { token: refreshToken }),
+  
+  logout: () => 
+    api.post('/auth/logout'),
   
   getProfile: () => 
     api.get('/auth/profile'),
